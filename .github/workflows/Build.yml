@@ -5,7 +5,12 @@ on:
     branches: [main]
     paths:
       - Dockerfile
-      - .github/workflows/build.yml
+      - .github/workflows/Build.yml
+  # Build and test (but don't push) Dependabot and other PRs
+  pull_request:
+    paths:
+      - Dockerfile
+      - .github/workflows/Build.yml
   schedule:
     # Monthly rebuild to pick up Debian security updates in the base image
     - cron: "0 4 1 * *"
@@ -25,19 +30,61 @@ jobs:
         id: meta
         run: |
           pg=$(grep -oP '^FROM postgres:\K[0-9.]+' Dockerfile)
-          vc=$(grep -oP '^FROM tensorchord/vchord-scratch:pg18-v\K[0-9.]+' Dockerfile)
+          major=${pg%%.*}
+          vc_pg=$(grep -oP '^FROM tensorchord/vchord-scratch:pg\K[0-9]+' Dockerfile)
+          vc=$(grep -oP '^FROM tensorchord/vchord-scratch:pg[0-9]+-v\K[0-9.]+' Dockerfile)
+          if [ "$vc_pg" != "$major" ]; then
+            echo "::error file=Dockerfile::vchord-scratch is built for pg${vc_pg}, but the base image is postgres ${major}"
+            exit 1
+          fi
+          echo "major=${major}" >> "$GITHUB_OUTPUT"
           echo "version=${pg}-vchord${vc}" >> "$GITHUB_OUTPUT"
           echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
+      - name: Build test image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          pull: true
+          load: true
+          tags: vchord-postgres:test
+
+      - name: Smoke test
+        run: |
+          docker run -d --name pg -e POSTGRES_PASSWORD=test vchord-postgres:test
+          # Only the final server listens on TCP, not the temporary one used during init
+          for i in $(seq 60); do
+            docker exec pg pg_isready -q -h 127.0.0.1 && break
+            sleep 1
+          done
+          docker exec -i pg psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE EXTENSION vchord CASCADE;
+          SELECT extname, extversion FROM pg_extension WHERE extname IN ('vchord', 'vector');
+          SHOW shared_preload_libraries;
+          CREATE TABLE items (id int, embedding vector(3));
+          INSERT INTO items SELECT i, ARRAY[random(), random(), random()]::vector FROM generate_series(1, 1000) i;
+          CREATE INDEX ON items USING vchordrq (embedding vector_l2_ops);
+          SET enable_seqscan = off;
+          EXPLAIN (COSTS OFF) SELECT id FROM items ORDER BY embedding <-> '[0.5,0.5,0.5]' LIMIT 5;
+          SELECT id FROM items ORDER BY embedding <-> '[0.5,0.5,0.5]' LIMIT 5;
+          SQL
+
+      - name: Container logs
+        if: failure()
+        run: docker logs pg
+
       - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Same inputs as the test build, so this is served from the build cache
       - uses: docker/build-push-action@v6
+        if: github.event_name != 'pull_request'
         with:
           context: .
           pull: true
@@ -45,5 +92,5 @@ jobs:
           platforms: linux/amd64
           labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           tags: |
-            ${{ steps.meta.outputs.image }}:pg18
+            ${{ steps.meta.outputs.image }}:pg${{ steps.meta.outputs.major }}
             ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}

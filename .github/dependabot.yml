@@ -1,0 +1,19 @@
+version: 2
+
+updates:
+  # Bumps the FROM lines in the Dockerfile: Postgres minor releases
+  # (18.6-bookworm -> 18.7-bookworm) and VectorChord releases (pg18-v1.1.1 ->
+  # pg18-v1.2.0). The Debian suffix and the pg18- prefix are kept as-is.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      # A new Postgres major needs a pg_upgrade or dump/restore, so it's done by hand
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
