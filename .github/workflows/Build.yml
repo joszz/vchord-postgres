@@ -41,7 +41,7 @@ jobs:
           echo "version=${pg}-vchord${vc}" >> "$GITHUB_OUTPUT"
           echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Build test image
         uses: docker/build-push-action@v7
