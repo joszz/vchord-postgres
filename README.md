@@ -40,12 +40,7 @@ Every build overwrites both tags, including the monthly security rebuild. That
 rebuild can bring in newer Debian packages and a newer pgvector. To pin an exact
 image, use its digest (`ghcr.io/joszz/vchord-postgres@sha256:...`).
 
-The repository is private, so the package is private too. Before you pull, log
-in with a personal access token that has the `read:packages` scope:
-
-```sh
-echo "$GHCR_TOKEN" | docker login ghcr.io -u joszz --password-stdin
-```
+The package is public, so you can pull it without logging in to GHCR.
 
 ## Usage
 
