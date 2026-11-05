@@ -69,6 +69,19 @@ jobs:
           SET enable_seqscan = off;
           EXPLAIN (COSTS OFF) SELECT id FROM items ORDER BY embedding <-> '[0.5,0.5,0.5]' LIMIT 5;
           SELECT id FROM items ORDER BY embedding <-> '[0.5,0.5,0.5]' LIMIT 5;
+          CREATE EXTENSION postgis;
+          CREATE EXTENSION postgis_topology;
+          CREATE EXTENSION postgis_raster;
+          SELECT postgis_full_version();
+          -- ST_Transform exercises PROJ, ST_Buffer exercises GEOS
+          SELECT ST_AsText(ST_Transform(ST_SetSRID(ST_MakePoint(5.12, 52.09), 4326), 3857));
+          SELECT ST_Area(ST_Buffer(ST_MakePoint(0, 0), 1));
+          CREATE TABLE places (id int, geom geometry(Point, 4326));
+          INSERT INTO places SELECT i, ST_SetSRID(ST_MakePoint(random() * 10, random() * 10), 4326) FROM generate_series(1, 1000) i;
+          CREATE INDEX ON places USING gist (geom);
+          ANALYZE places;
+          EXPLAIN (COSTS OFF) SELECT id FROM places WHERE ST_DWithin(geom, ST_SetSRID(ST_MakePoint(5, 5), 4326), 1);
+          SELECT count(*) FROM places WHERE ST_DWithin(geom, ST_SetSRID(ST_MakePoint(5, 5), 4326), 1);
           SQL
 
       - name: Container logs
