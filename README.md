@@ -1,9 +1,10 @@
 # vchord-postgres
 
 The official [`postgres`](https://hub.docker.com/_/postgres) image with
-[VectorChord](https://github.com/tensorchord/VectorChord) and
-[pgvector](https://github.com/pgvector/pgvector) added, built and published to
-GHCR by GitHub Actions.
+[VectorChord](https://github.com/tensorchord/VectorChord),
+[pgvector](https://github.com/pgvector/pgvector) and
+[PostGIS](https://postgis.net/) added, built and published to GHCR by GitHub
+Actions.
 
 TensorChord publishes its own `vchord-postgres` image, but a new Postgres patch
 release only reaches it once they rebuild. This image starts from the official
@@ -18,10 +19,14 @@ schedule.
 | PostgreSQL | `postgres:18.6-bookworm` | 18.6, Debian 12 (bookworm) |
 | VectorChord | `tensorchord/vchord-scratch:pg18-v1.1.1` | 1.1.1 |
 | pgvector | `postgresql-18-pgvector` from the PGDG apt repo in the base image | latest when the image is built |
+| PostGIS | `postgresql-18-postgis-3` and `-scripts` from the same PGDG repo | latest 3.x when the image is built |
 
 - `shared_preload_libraries=vchord,vector` is set through the image's `CMD`.
   See [Changing server settings](#changing-server-settings) before you override
   `command`.
+- PostGIS needs no preloading. The `postgis`, `postgis_raster`,
+  `postgis_topology` and `postgis_sfcgal` extensions are available. The
+  command-line tools (`shp2pgsql`, `raster2pgsql`) are not included.
 - The image is built for `linux/amd64` only.
 
 Everything else behaves the same as the official image: the environment
@@ -77,6 +82,18 @@ CREATE TABLE items (id bigserial PRIMARY KEY, embedding vector(768));
 CREATE INDEX ON items USING vchordrq (embedding vector_cosine_ops);
 ```
 
+PostGIS is enabled the same way, per database:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS postgis;
+-- Only if you need them:
+CREATE EXTENSION IF NOT EXISTS postgis_raster;
+CREATE EXTENSION IF NOT EXISTS postgis_topology;
+
+CREATE TABLE places (id bigserial PRIMARY KEY, geom geometry(Point, 4326));
+CREATE INDEX ON places USING gist (geom);
+```
+
 To tune `vchordrq` (lists, probes and so on), see the
 [VectorChord documentation](https://docs.vectorchord.ai/).
 
@@ -114,25 +131,35 @@ Other settings (`shared_buffers`, `work_mem` and so on) can be set either with
   smoke-tests the PR without pushing. Merging it publishes the new image.
   Dependabot never proposes a new Postgres major version (see below).
 - **A scheduled rebuild** runs on the 1st of every month. It picks up Debian
-  security fixes in the base image and the current pgvector package.
+  security fixes in the base image and the current pgvector and PostGIS
+  packages.
 - **To rebuild by hand**, open Actions, choose **build**, then **Run workflow**.
 
 ### After deploying a new image
 
 A Postgres minor update only needs a container restart.
 
-When VectorChord or pgvector changes version, the new files are in the image,
-but each database keeps using the old extension version until you update it. Run
-this in every database that uses the extensions:
+When VectorChord, pgvector or PostGIS changes version, the new files are in the
+image, but each database keeps using the old extension version until you update
+it. Run this in every database that uses the extensions:
 
 ```sql
 SELECT name, installed_version, default_version
 FROM pg_available_extensions
-WHERE name IN ('vchord', 'vector');
+WHERE name IN ('vchord', 'vector', 'postgis', 'postgis_raster', 'postgis_topology');
 
 ALTER EXTENSION vector UPDATE;
 ALTER EXTENSION vchord UPDATE;
+-- Updates postgis and every installed postgis_* extension
+SELECT postgis_extensions_upgrade();
 ```
+
+PostGIS only installs the shared library of its current minor version
+(for example `postgis-3.so`), so after an update from 3.7 to 3.8 the old
+version's SQL functions point at the new library. Run
+`postgis_extensions_upgrade()` soon after deploying, and check the
+[PostGIS release notes](https://postgis.net/news/) for anything that requires
+extra steps.
 
 Before you update, read the
 [VectorChord release notes](https://github.com/tensorchord/VectorChord/releases).
@@ -158,7 +185,7 @@ as a migration:
    for the new major version.
 2. Update both `FROM` lines in the [Dockerfile](Dockerfile). The `pgNN` in the
    vchord-scratch tag must match the Postgres major version. CI refuses to build
-   if they differ. The pgvector package and the image tags follow
+   if they differ. The pgvector and PostGIS packages and the image tags follow
    automatically.
 3. Migrate the data with `pg_dumpall` and a restore into a fresh volume, or
    with `pg_upgrade`.
@@ -191,7 +218,9 @@ monthly schedule and when started by hand. Each run does the following:
    that both are for the same major version.
 2. Builds the image.
 3. Runs a smoke test: it starts the container, creates the extensions, builds a
-   `vchordrq` index and checks that a nearest-neighbour query uses it.
+   `vchordrq` index and checks that a nearest-neighbour query uses it. It then
+   creates the PostGIS extensions, runs a coordinate transform and a buffer
+   (to check that PROJ and GEOS load), and builds and queries a GiST index.
 4. If this is not a PR, logs in to GHCR and pushes `pgNN` and
    `<postgres>-vchord<vchord>`.
 

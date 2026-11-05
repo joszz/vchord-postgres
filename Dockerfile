@@ -11,9 +11,13 @@ FROM tensorchord/vchord-scratch:pg18-v1.1.1 AS vchord
 
 FROM postgres:18.6-bookworm
 
-# PG_MAJOR is set by the postgres base image
+# PG_MAJOR is set by the postgres base image. pgvector and PostGIS come from
+# the PGDG apt repo that the base image already has configured.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends "postgresql-${PG_MAJOR}-pgvector" \
+ && apt-get install -y --no-install-recommends \
+      "postgresql-${PG_MAJOR}-pgvector" \
+      "postgresql-${PG_MAJOR}-postgis-3" \
+      "postgresql-${PG_MAJOR}-postgis-3-scripts" \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=vchord / /
