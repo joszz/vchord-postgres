@@ -9,7 +9,7 @@
 
 FROM tensorchord/vchord-scratch:pg18-v1.1.1 AS vchord
 
-FROM postgres:18.6-bookworm
+FROM postgres:18.7-bookworm
 
 # PG_MAJOR is set by the postgres base image. pgvector and PostGIS come from
 # the PGDG apt repo that the base image already has configured.
